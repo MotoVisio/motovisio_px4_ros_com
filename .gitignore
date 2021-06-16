@@ -1,0 +1,4 @@
+cmake-build-debug
+.idea 
+src/micrortps_agent/
+scripts/__pycache__
