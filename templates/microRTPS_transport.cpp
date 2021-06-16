@@ -112,8 +112,26 @@ ssize_t Transport_node::read(uint8_t *topic_ID, char out_buffer[], size_t buffer
 	}
 
 	*topic_ID = 255;
+	size_t header_size = sizeof(struct Header);
+	ssize_t len = 0;
 
-	ssize_t len = node_read((void *)(rx_buffer + rx_buff_pos), sizeof(rx_buffer) - rx_buff_pos);
+	// Less than a uRTPS header in the buffer so read more data
+	if (rx_buff_pos < header_size) {
+		len = node_read((void *)(rx_buffer + rx_buff_pos), sizeof(rx_buffer) - rx_buff_pos);
+	}
+	// if we have an incomplete message read more data
+	else if (memcmp(rx_buffer, ">>>", 3) == 0) {
+		struct Header *header = (struct Header *)&rx_buffer[0];
+		uint32_t payload_len = ((uint32_t)header->payload_len_h << 8) | header->payload_len_l;
+
+	        if (header_size + payload_len > rx_buff_pos) {
+                	// incomplete message
+			len = node_read((void *)(rx_buffer + rx_buff_pos), sizeof(rx_buffer) - rx_buff_pos);
+		}
+	}
+	// otherwise find if there is another message in the buffer before reading more data
+	else {
+	}
 
 	if (len < 0) {
 		int errsv = errno;
@@ -131,93 +149,95 @@ ssize_t Transport_node::read(uint8_t *topic_ID, char out_buffer[], size_t buffer
 
 	rx_buff_pos += len;
 
-	// We read some
-	size_t header_size = sizeof(struct Header);
+	// Loop until we find a valid message, an incomplete message, or have no data left
+	while (1) {
 
-	// but not enough
-	if (rx_buff_pos < header_size) {
-		return 0;
-	}
+		// but not enough
+		if (rx_buff_pos < header_size) {
+			return 0;
+		}
 
-	uint32_t msg_start_pos = 0;
+		uint32_t msg_start_pos = 0;
 
-	for (msg_start_pos = 0; msg_start_pos <= rx_buff_pos - header_size; ++msg_start_pos) {
-		if ('>' == rx_buffer[msg_start_pos] && memcmp(rx_buffer + msg_start_pos, ">>>", 3) == 0) {
+		for (msg_start_pos = 0; msg_start_pos <= rx_buff_pos - header_size; ++msg_start_pos) {
+			if ('>' == rx_buffer[msg_start_pos] && memcmp(rx_buffer + msg_start_pos, ">>>", 3) == 0) {
+				break;
+			}
+		}
+
+		// Start not found
+		if (msg_start_pos > (rx_buff_pos - header_size)) {
+#ifndef PX4_DEBUG
+			if (debug) printf("\033[1;33m[ micrortps_transport ]\t                                (↓↓ %u)\033[0m\n", msg_start_pos);
+#else
+			if (debug) PX4_DEBUG("                               (↓↓ %u)", msg_start_pos);
+#endif /* PX4_DEBUG */
+
+			// All we've checked so far is garbage, drop it - but save unchecked bytes
+			memmove(rx_buffer, rx_buffer + msg_start_pos, rx_buff_pos - msg_start_pos);
+			rx_buff_pos -= msg_start_pos;
+			return -1;
+		}
+
+		// [>,>,>,topic_ID,seq,payload_length_H,payload_length_L,CRCHigh,CRCLow,payloadStart, ... ,payloadEnd]
+		struct Header *header = (struct Header *)&rx_buffer[msg_start_pos];
+		uint32_t payload_len = ((uint32_t)header->payload_len_h << 8) | header->payload_len_l;
+
+		// The message won't fit the buffer.
+		if (buffer_len < header_size + payload_len) {
+			// Drop the message and continue with the read buffer
+			memmove(rx_buffer, rx_buffer + msg_start_pos + 1, rx_buff_pos - (msg_start_pos + 1));
+			rx_buff_pos -= (msg_start_pos + 1);
+			return -EMSGSIZE;
+		}
+
+		// We do not have a complete message yet
+		if (msg_start_pos + header_size + payload_len > rx_buff_pos) {
+			// If there's garbage at the beginning, drop it
+			if (msg_start_pos > 0) {
+#ifndef PX4_DEBUG
+				if (debug) printf("\033[1;33m[ micrortps_transport ]\t                                (↓ %u)\033[0m\n", msg_start_pos);
+#else
+				if (debug) PX4_DEBUG("                             (↓ %u)", msg_start_pos);
+#endif /* PX4_DEBUG */
+				memmove(rx_buffer, rx_buffer + msg_start_pos, rx_buff_pos - msg_start_pos);
+				rx_buff_pos -= msg_start_pos;
+			}
+
+			return 0;
+		}
+
+		uint16_t read_crc = ((uint16_t)header->crc_h << 8) | header->crc_l;
+		uint16_t calc_crc = crc16((uint8_t *)rx_buffer + msg_start_pos + header_size, payload_len);
+
+		if (read_crc != calc_crc) {
+#ifndef PX4_DEBUG
+			if (debug) printf("\033[0;31m[ micrortps_transport ]\tBad CRC %u != %u\t\t(↓ %lu)\033[0m\n", read_crc, calc_crc, (unsigned long)(header_size + payload_len));
+#else
+			if (debug) PX4_DEBUG("Bad CRC %u != %u\t\t(↓ %lu)", read_crc, calc_crc, (unsigned long)(header_size + payload_len));
+#endif /* PX4_DEBUG */
+
+			// Drop garbage up just beyond the start of the message
+			memmove(rx_buffer, rx_buffer + (msg_start_pos + 1), rx_buff_pos);
+
+			// If there is a CRC error, the payload len cannot be trusted
+			rx_buff_pos -= (msg_start_pos + 1);
+
+			// Continue processing buffer to look for another message
+			continue;
+
+		} else {
+			// copy message to outbuffer and set other return values
+			memmove(out_buffer, rx_buffer + msg_start_pos + header_size, payload_len);
+			*topic_ID = header->topic_ID;
+			len = payload_len + header_size;
+
+			// discard message from rx_buffer
+			rx_buff_pos -= msg_start_pos + header_size + payload_len;
+			memmove(rx_buffer, rx_buffer + msg_start_pos + header_size + payload_len, rx_buff_pos);
 			break;
 		}
 	}
-
-	// Start not found
-	if (msg_start_pos > (rx_buff_pos - header_size)) {
-#ifndef PX4_DEBUG
-		if (debug) printf("\033[1;33m[ micrortps_transport ]\t                                (↓↓ %u)\033[0m\n", msg_start_pos);
-#else
-		if (debug) PX4_DEBUG("                               (↓↓ %u)", msg_start_pos);
-#endif /* PX4_DEBUG */
-
-		// All we've checked so far is garbage, drop it - but save unchecked bytes
-		memmove(rx_buffer, rx_buffer + msg_start_pos, rx_buff_pos - msg_start_pos);
-		rx_buff_pos -= msg_start_pos;
-		return -1;
-	}
-
-	// [>,>,>,topic_ID,seq,payload_length_H,payload_length_L,CRCHigh,CRCLow,payloadStart, ... ,payloadEnd]
-	struct Header *header = (struct Header *)&rx_buffer[msg_start_pos];
-	uint32_t payload_len = ((uint32_t)header->payload_len_h << 8) | header->payload_len_l;
-
-	// The message won't fit the buffer.
-	if (buffer_len < header_size + payload_len) {
-		// Drop the message and continue with the read buffer
-		memmove(rx_buffer, rx_buffer + msg_start_pos + 1, rx_buff_pos - (msg_start_pos + 1));
-		rx_buff_pos -= (msg_start_pos + 1);
-		return -EMSGSIZE;
-	}
-
-	// We do not have a complete message yet
-	if (msg_start_pos + header_size + payload_len > rx_buff_pos) {
-		// If there's garbage at the beginning, drop it
-		if (msg_start_pos > 0) {
-#ifndef PX4_DEBUG
-			if (debug) printf("\033[1;33m[ micrortps_transport ]\t                                (↓ %u)\033[0m\n", msg_start_pos);
-#else
-			if (debug) PX4_DEBUG("                             (↓ %u)", msg_start_pos);
-#endif /* PX4_DEBUG */
-			memmove(rx_buffer, rx_buffer + msg_start_pos, rx_buff_pos - msg_start_pos);
-			rx_buff_pos -= msg_start_pos;
-		}
-
-		return 0;
-	}
-
-	uint16_t read_crc = ((uint16_t)header->crc_h << 8) | header->crc_l;
-	uint16_t calc_crc = crc16((uint8_t *)rx_buffer + msg_start_pos + header_size, payload_len);
-
-	if (read_crc != calc_crc) {
-#ifndef PX4_DEBUG
-		if (debug) printf("\033[0;31m[ micrortps_transport ]\tBad CRC %u != %u\t\t(↓ %lu)\033[0m\n", read_crc, calc_crc, (unsigned long)(header_size + payload_len));
-#else
-		if (debug) PX4_DEBUG("Bad CRC %u != %u\t\t(↓ %lu)", read_crc, calc_crc, (unsigned long)(header_size + payload_len));
-#endif /* PX4_DEBUG */
-
-		// Drop garbage up just beyond the start of the message
-		memmove(rx_buffer, rx_buffer + (msg_start_pos + 1), rx_buff_pos);
-
-		// If there is a CRC error, the payload len cannot be trusted
-		rx_buff_pos -= (msg_start_pos + 1);
-
-		len = -1;
-
-	} else {
-		// copy message to outbuffer and set other return values
-		memmove(out_buffer, rx_buffer + msg_start_pos + header_size, payload_len);
-		*topic_ID = header->topic_ID;
-		len = payload_len + header_size;
-
-		// discard message from rx_buffer
-		rx_buff_pos -= msg_start_pos + header_size + payload_len;
-		memmove(rx_buffer, rx_buffer + msg_start_pos + header_size + payload_len, rx_buff_pos);
-	}
-
 	return len;
 }
 
