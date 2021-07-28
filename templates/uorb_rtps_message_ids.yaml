@@ -241,6 +241,7 @@ rtps:
   - id: 109
     msg: PowerMonitor
     receive: true
+    send: true
   - id: 110
     msg: LandingGear
   - id: 111
