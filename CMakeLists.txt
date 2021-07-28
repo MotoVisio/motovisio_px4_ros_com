@@ -78,7 +78,7 @@ function(custom_executable subfolder target)
 endfunction()
 
 # Add frame_transforms lib
-add_library(frame_transforms SHARED src/lib/frame_transforms.cpp)
+add_library(frame_transforms SHARED src/lib/frame_transforms.cpp src/examples/listeners/power_monitor_listener.cpp)
 ament_target_dependencies(frame_transforms Eigen3 geometry_msgs sensor_msgs)
 target_include_directories(frame_transforms PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}>
@@ -92,6 +92,7 @@ add_executable(micrortps_agent ${MICRORTPS_AGENT_FILES})
 target_link_libraries(micrortps_agent fastrtps fastcdr)
 
 # Add examples
+custom_executable(examples/listeners power_monitor_listener)
 custom_executable(examples/listeners sensor_combined_listener)
 custom_executable(examples/listeners vehicle_gps_position_listener)
 custom_executable(examples/advertisers debug_vect_advertiser)
