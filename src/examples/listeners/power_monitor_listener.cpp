@@ -20,14 +20,14 @@ class PowerMonitorListener : public rclcpp::Node
                             std::cout << "ts: "          << msg->timestamp    << std::endl;
                             std::cout << "voltage (V): " << msg->voltage_v    << std::endl;
                             std::cout << "current (A): " << msg->current_a    << std::endl;
-                            std::cout << "Power (W): " << msg->rconf        << std::endl;
-                            std::cout << "Power (W): " << msg->rsv        << std::endl;
-                            std::cout << "Power (W): " << msg->rbv        << std::endl;
-                            std::cout << "Power (W): " << msg->rp        << std::endl;
-                            std::cout << "Power (W): " << msg->rc        << std::endl;
-                            std::cout << "Power (W): " << msg->rcal        << std::endl;
-                            std::cout << "Power (W): " << msg->me        << std::endl;
-                            std::cout << "Power (W): " << msg->al        << std::endl;
+                            std::cout << "rconf: "       << msg->rconf        << std::endl;
+                            std::cout << "rsv: "         << msg->rsv          << std::endl;
+                            std::cout << "rbv: "         << msg->rbv          << std::endl;
+                            std::cout << "rp: "          << msg->rp           << std::endl;
+                            std::cout << "rc: "          << msg->rc           << std::endl;
+                            std::cout << "rcal: "        << msg->rcal         << std::endl;
+                            std::cout << "me: "          << msg->me           << std::endl;
+                            std::cout << "al: "          << msg->al           << std::endl;
                         });
             }
 
