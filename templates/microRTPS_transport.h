@@ -75,19 +75,6 @@ public:
 	/** Get the Length of struct Header to make headroom for the size of struct Header along with payload */
 	size_t get_header_length();
 
-protected:
-	virtual ssize_t node_read(void *buffer, size_t len) = 0;
-	virtual ssize_t node_write(void *buffer, size_t len) = 0;
-	virtual bool fds_OK() = 0;
-	uint16_t crc16_byte(uint16_t crc, const uint8_t data);
-	uint16_t crc16(uint8_t const *buffer, size_t len);
-
-protected:
-	uint32_t rx_buff_pos;
-	char rx_buffer[BUFFER_SIZE] = {};
-	bool debug = false;
-	uint8_t _seq_number{0};
-
 private:
 	struct __attribute__((packed)) Header {
 		char marker[3];
