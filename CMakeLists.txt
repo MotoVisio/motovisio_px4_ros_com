@@ -13,11 +13,11 @@ endif()
 # Check if any sanitizers set
 include(EnableSanitizers)
 
-# Check if ROS_DISTRO is Dashing, Eloquent or Foxy
+# Check if ROS_DISTRO is greater or equal to Dashing
 # Required since
 #   - "create_subscription()" and "create_publisher()" APIs changed
 #   - eigen3_cmake_module is only available in these distros
-list(APPEND ROS_DISTROS "dashing" "eloquent" "foxy")
+list(APPEND ROS_DISTROS "dashing" "eloquent" "foxy" "galactic" "rolling")
 set(ROS_DISTRO)
 if(DEFINED ENV{ROS2_DISTRO})
   set(ROS_DISTRO $ENV{ROS2_DISTRO})
@@ -89,7 +89,8 @@ target_link_libraries(frame_transforms Eigen3::Eigen ${geometry_msgs_LIBRARIES} 
 
 # Add microRTPS agent
 add_executable(micrortps_agent ${MICRORTPS_AGENT_FILES})
-target_link_libraries(micrortps_agent fastrtps fastcdr)
+ament_target_dependencies(micrortps_agent fastcdr fastrtps rclcpp)
+target_link_libraries(micrortps_agent fastcdr fastrtps ${rclcpp_LIBRARIES})
 
 # Add examples
 custom_executable(examples/listeners sensor_combined_listener)
